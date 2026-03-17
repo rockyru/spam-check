@@ -11,6 +11,9 @@ from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from fastapi import Depends
+from rate_limit import limit_scans, limit_metrics, limit_feedback
+
 import httpx
 import PIL.Image
 import google.generativeai as genai
@@ -535,7 +538,7 @@ def image_hash(base64_image: str) -> str:
 
 # ---------- Routes ----------
 
-@app.post("/api/verify")
+@app.post("/api/verify", dependencies=[Depends(limit_scans)])
 async def verify(request: ScanRequest):
     if not request.content and not request.image:
         raise HTTPException(status_code=400, detail="No content or image provided.")
@@ -611,7 +614,7 @@ async def verify(request: ScanRequest):
     response_payload["raw_key"] = raw_key
     return response_payload
 
-@router.post("/api/feedback")
+@router.post("/api/feedback", dependencies=[Depends(limit_feedback)])
 async def submit_feedback(payload: FeedbackIn):
     resp = (
         supabase.table("feedback")
@@ -630,7 +633,7 @@ async def submit_feedback(payload: FeedbackIn):
     return {"ok": True}
 
 
-@app.get("/api/metrics/summary")
+@app.get("/api/metrics/summary", dependencies=[Depends(limit_metrics)])
 async def metrics_summary():
     now = datetime.now(timezone.utc)
     day_ago = now - timedelta(days=1)
