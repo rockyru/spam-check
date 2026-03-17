@@ -110,6 +110,10 @@ export const useScanner = () => {
     }
   };
 
-    return { analyze, loading, result, cooldown, setResult, sendFeedback, rawKey };
+  const reset = () => {
+    setResult(null);
+  }
+
+    return { analyze, loading, result, cooldown, setResult, sendFeedback, rawKey, reset };
 
 };

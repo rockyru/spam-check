@@ -42,7 +42,7 @@ const Navbar = ({ onScanClick }) => {
               onClick={handleCheckNow}
               className="bg-black text-white px-5 py-2.5 rounded-full text-[11px] font-bold hover:bg-slate-800 transition-all active:scale-95"
             >
-              Check Now
+              Scam Check
             </button>
           </div>
         </div>
