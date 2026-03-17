@@ -38,7 +38,7 @@ router = APIRouter()
 origins = [
     "http://localhost:5173",
     "http://localhost:5174",
-    "https://spam-check-eta.vercel.app/",
+    "https://spam-check-eta.vercel.app",
 ]
 
 app.add_middleware(
