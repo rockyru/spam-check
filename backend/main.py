@@ -213,8 +213,23 @@ async def _feedback_risk_boost(urls: List[str]) -> tuple[int, list[str]]:
 
 async def text_spam_with_safe_browsing(text: str) -> dict:
     urls = extract_urls(text)
+
     if not urls:
-        return {"score": 0, "summary": "Not spam (no URL detected)", "flags": []}
+        score, flags = sms_text_risk(text)
+        if score >= 8:
+            summary = "High risk: message looks like a scam or phishing SMS."
+        elif score >= 4:
+            summary = "Medium risk: message has several scam-like patterns."
+        elif score > 0:
+            summary = "Low risk: some suspicious patterns detected."
+        else:
+            summary = "No scam patterns or links detected."
+
+        return {
+            "score": score,
+            "summary": summary,
+            "flags": flags,
+        }
 
     sb_result = await check_safe_browsing(urls)
     any_bad = any(sb_result.values())
@@ -293,6 +308,23 @@ async def text_spam_with_safe_browsing(text: str) -> dict:
         fb_extra, fb_flags = await _feedback_risk_boost(urls)
         score += fb_extra
         flags.extend(fb_flags)
+
+        # NEW: brand / pattern rules for PH scams
+        text_low = (text or "").lower()
+
+        # BDO account security scare (like your example)
+        if "bdo" in text_low and "account" in text_low and any(
+            p in text_low for p in ["unusual activity", "verify your details", "verify your account"]
+        ):
+            score = max(score, 8)  # force High
+            flags.append("BRAND_IMPERSONATION")
+            flags.append("ACCOUNT_SECURITY_SCARE")
+
+        # You can add more brand rules similarly, e.g. GCash, BPI, etc.
+        # if "gcash" in text_low and "account" in text_low and "verify" in text_low:
+        #     score = max(score, 8)
+        #     flags.append("EWALLET_IMPERSONATION")
+        #     flags.append("ACCOUNT_SECURITY_SCARE")
 
         score = max(0, min(score, 10))
 
@@ -419,7 +451,75 @@ async def _feedback_strongest_label(raw_content: str) -> str | None:
 
     return strongest
 
-import hashlib
+def sms_text_risk(text: str) -> tuple[int, list[str]]:
+    """
+    Simple heuristic risk scoring for SMS without URLs.
+    Score: 0–10, higher = more likely scam/smishing.
+    """
+    t = (text or "").lower()
+    score = 0
+    flags: list[str] = []
+
+    # 1) Urgency / pressure
+    if any(p in t for p in ["urgent", "immediately", "right away", "act now", "asap", "within 24 hours"]):
+        score += 2
+        flags.append("URGENT_LANGUAGE")
+
+    # 2) Money / prizes / rewards
+    if any(p in t for p in ["you have won", "congratulations", "winner", "jackpot", "lottery", "prize"]):
+        score += 3
+        flags.append("FAKE_GIVEAWAY")
+
+    if any(p in t for p in ["claim your reward", "claim your prize", "cash prize"]):
+        score += 2
+        flags.append("REWARD_OFFER")
+
+    # 3) Bank / account / OTP / verification
+    if any(p in t for p in ["otp", "one time password", "verification code", "6-digit code", "6 digit code"]):
+        score += 2
+        flags.append("CODE_REQUEST")
+
+    if any(p in t for p in ["account", "bank", "card", "transaction", "billing"]):
+        score += 2
+        flags.append("ACCOUNT_MENTION")
+
+    if any(p in t for p in ["suspended", "blocked", "locked", "temporarily disabled"]):
+        score += 2
+        flags.append("ACCOUNT_THREAT")
+
+    # 4) Delivery / parcel scams
+    if any(p in t for p in ["package", "parcel", "delivery", "shipment"]):
+        score += 2
+        flags.append("DELIVERY_MENTION")
+
+    if any(p in t for p in ["unpaid fee", "customs fee", "delivery fee"]):
+        score += 2
+        flags.append("FEE_REQUEST")
+
+    # 5) Generic greeting / impersonation
+    if any(p in t for p in ["dear customer", "valued customer", "dear user"]):
+        score += 1
+        flags.append("GENERIC_GREETING")
+
+    # 6) Social engineering patterns
+    if any(p in t for p in ["wrong number", "sorry wrong number"]):
+        score += 1
+        flags.append("WRONG_NUMBER_BAIT")
+
+    if any(p in t for p in ["lost my phone", "naaksidente ako", "emergency", "hospital"]):
+        score += 2
+        flags.append("EMERGENCY_STORY")
+
+    # 7) Callback / contact tricks
+    if any(p in t for p in ["call this number", "contact this number", "text back this number"]):
+        score += 1
+        flags.append("CALLBACK_REQUEST")
+
+    # Normalize
+    score = max(0, min(score, 10))
+    flags = list(set(flags))
+    return score, flags
+
 
 def image_hash(base64_image: str) -> str:
     try:
@@ -622,6 +722,9 @@ async def metrics_summary():
 
     sb_hit_rate = (sb_hits / total_scans_for_sb) if total_scans_for_sb > 0 else 0.0
     feedback_7d = len(feedbacks)
+
+    print("DEBUG daily_counts:", daily_counts)
+
 
     return {
         "totals": {
