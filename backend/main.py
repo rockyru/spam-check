@@ -13,7 +13,7 @@ from pathlib import Path
 
 from fastapi import Depends
 from rate_limit import limit_scans, limit_metrics, limit_feedback
-
+from metrics_cache import metrics_cache
 import httpx
 import PIL.Image
 import google.generativeai as genai
@@ -635,6 +635,11 @@ async def submit_feedback(payload: FeedbackIn):
 
 @app.get("/api/metrics/summary", dependencies=[Depends(limit_metrics)])
 async def metrics_summary():
+    cached = metrics_cache.get()
+
+    if cached is not None:
+        return cached
+
     now = datetime.now(timezone.utc)
     day_ago = now - timedelta(days=1)
     week_ago = now - timedelta(days=7)
@@ -726,10 +731,7 @@ async def metrics_summary():
     sb_hit_rate = (sb_hits / total_scans_for_sb) if total_scans_for_sb > 0 else 0.0
     feedback_7d = len(feedbacks)
 
-    print("DEBUG daily_counts:", daily_counts)
-
-
-    return {
+    summary = {
         "totals": {
             "scans_24h": scans_24h,
             "scans_7d": scans_7d,
@@ -739,6 +741,10 @@ async def metrics_summary():
         "sb_hit_rate": sb_hit_rate,
         "daily_scans": daily_scans,
     }
+
+
+    metrics_cache.set(summary)
+    return summary
 
 app.include_router(router)
 
