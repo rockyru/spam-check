@@ -1,25 +1,30 @@
 import { useState, useEffect } from 'react';
 
-// TOGGLE THIS TO TRUE TO SAVE YOUR QUOTA
-const MOCK_MODE = true; 
+const API_URL = import.meta.env.VITE_API_URL;
+
+// Toggle this to true if you want to disable real API calls
+const MOCK_MODE = false;
 
 const MOCK_RESULTS = [
-  { 
-    score: 1, 
-    summary: "Everything looks good! This link leads to the official site and shows no signs of a scam.", 
-    flags: ["OFFICIAL_SOURCE", "SECURE_LINK"] 
+  {
+    score: 1,
+    summary:
+      'Everything looks good! This link leads to the official site and shows no signs of a scam.',
+    flags: ['OFFICIAL_SOURCE', 'SECURE_LINK'],
   },
-  { 
-    score: 9, 
-    summary: "Watch out! This looks like a phishing attempt designed to steal your login info.", 
-    flags: ["MALICIOUS", "FAKE_SENDER"] 
-  }
+  {
+    score: 9,
+    summary:
+      'Watch out! This looks like a phishing attempt designed to steal your login info.',
+    flags: ['MALICIOUS', 'FAKE_SENDER'],
+  },
 ];
 
 export const useScanner = () => {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [cooldown, setCooldown] = useState(() => {
+    if (typeof window === 'undefined') return 0;
     const saved = localStorage.getItem('l7_cooldown_expiry');
     if (!saved) return 0;
     const remaining = Math.ceil((parseInt(saved) - Date.now()) / 1000);
@@ -48,22 +53,49 @@ export const useScanner = () => {
     setCooldown(seconds);
   };
 
-  const analyze = async (type, content) => {
-  setLoading(true);
-  try {
-    const response = await fetch('http://localhost:8000/api/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type, content })
-    });
-    const data = await response.json();
-    setResult(data);
-  } catch (error) {
-    console.error("Scan failed", error);
-  } finally {
-    setLoading(false);
-  }
-};
+  const analyze = async (type, content, image) => {
+    if (MOCK_MODE) {
+      const mock = MOCK_RESULTS[Math.floor(Math.random() * MOCK_RESULTS.length)];
+      setResult(mock);
+      return;
+    }
+
+    if (!API_URL) {
+      console.error('VITE_API_URL is not set');
+      setResult({
+        score: 0,
+        summary: 'Configuration error: API URL not set',
+        flags: ['ERROR'],
+      });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, content, image }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setResult(data);
+      // triggerCooldown(3); // optional
+    } catch (error) {
+      console.error('Scan failed', error);
+      setResult({
+        score: 0,
+        summary: 'Error checking this content',
+        flags: ['ERROR'],
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return { analyze, loading, result, cooldown, setResult };
 };

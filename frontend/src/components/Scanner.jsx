@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { useScanner } from '../hooks/useScanner';
 
+
 const Scanner = ({ scannerRef }) => {
   const { analyze, loading, result, cooldown } = useScanner();
   const [content, setContent] = useState('');
