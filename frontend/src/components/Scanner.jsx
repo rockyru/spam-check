@@ -13,7 +13,6 @@ const Scanner = ({ scannerRef }) => {
     setPreview(null);
     setPlaceholder("https://...");
     setContent("https://");
-    // Focus the textarea after a short delay to ensure it's rendered
     setTimeout(() => document.getElementById('magic-input')?.focus(), 10);
   };
 
@@ -23,15 +22,24 @@ const Scanner = ({ scannerRef }) => {
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        setPreview(reader.result);
+        const base64String = reader.result;
+        setPreview(base64String);
         setContent('');
-        analyze('auto', null, file);
+        // We pass the base64 string directly to our analyze hook
+        analyze('auto', '', base64String);
       };
       reader.readAsDataURL(file);
     }
   };
 
-  // 3. Clear State
+  // 3. Trigger Analysis (Text or combined)
+  const handleVerify = () => {
+    // If there is a preview, we are analyzing an image. 
+    // If not, we are analyzing the text content.
+    analyze('auto', content, preview);
+  };
+
+  // 4. Clear State
   const handleClear = () => {
     setContent('');
     setPreview(null);
@@ -57,7 +65,7 @@ const Scanner = ({ scannerRef }) => {
         )}
       </div>
 
-      {/* THE MAGIC BOX (With Pulse Animation) */}
+      {/* THE MAGIC BOX */}
       <div className={`
         bg-white rounded-[2.5rem] p-4 border-2 transition-all duration-500
         ${!content && !preview && !loading ? 'animate-soft-pulse' : 'border-slate-100'}
@@ -70,7 +78,7 @@ const Scanner = ({ scannerRef }) => {
               <img src={preview} alt="Preview" className="w-full h-full object-cover" />
               <button 
                 onClick={() => setPreview(null)} 
-                className="absolute top-1 right-1 w-6 h-6 bg-black/50 text-white rounded-full flex items-center justify-center backdrop-blur-md"
+                className="absolute top-1 right-1 w-6 h-6 bg-black/50 text-white rounded-full flex items-center justify-center backdrop-blur-md hover:bg-black transition-colors"
               >
                 ×
               </button>
@@ -105,7 +113,6 @@ const Scanner = ({ scannerRef }) => {
               📷
             </button>
 
-            {/* HIDDEN FILE INPUT (Fixed the crash) */}
             <input 
               type="file" 
               ref={fileInputRef} 
@@ -116,7 +123,7 @@ const Scanner = ({ scannerRef }) => {
           </div>
 
           <button 
-            onClick={() => analyze('auto', content, null)}
+            onClick={handleVerify}
             disabled={loading || cooldown > 0 || (!content && !preview)}
             className="bg-black text-white px-8 py-3 rounded-full font-bold text-sm hover:shadow-lg active:scale-95 transition-all disabled:opacity-20"
           >
@@ -138,7 +145,6 @@ const Scanner = ({ scannerRef }) => {
               </span>
             </div>
 
-            {/* Gauge */}
             <div className="w-full h-4 bg-slate-100 rounded-full relative overflow-hidden">
               <div 
                 className={`h-full rounded-full transition-all duration-[1500ms] ease-out ${
@@ -154,7 +160,7 @@ const Scanner = ({ scannerRef }) => {
               </p>
               
               <div className="flex flex-wrap justify-center gap-2 mb-6">
-                {result.flags.map((flag, i) => (
+                {result.flags?.map((flag, i) => (
                   <span key={i} className="px-3 py-1 bg-slate-50 text-[9px] font-bold text-slate-400 rounded-full border border-slate-100 uppercase tracking-wider">
                     {flag.replace('_', ' ')}
                   </span>

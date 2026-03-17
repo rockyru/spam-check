@@ -48,44 +48,22 @@ export const useScanner = () => {
     setCooldown(seconds);
   };
 
-  const analyze = async (inputType, content, file) => {
-    if (cooldown > 0) return;
-    setLoading(true);
-
-    // --- MOCK LOGIC ---
-    if (MOCK_MODE) {
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate 2s delay
-      const randomResult = MOCK_RESULTS[Math.floor(Math.random() * MOCK_RESULTS.length)];
-      setResult(randomResult);
-      setLoading(false);
-      triggerCooldown(10); // Shorter cooldown for testing
-      return randomResult;
-    }
-
-    // --- REAL API LOGIC ---
-    const formData = new FormData();
-    formData.append('input_type', inputType);
-    if (inputType === 'image') formData.append('file', file);
-    else formData.append('text_content', content);
-
-    try {
-      const response = await fetch('http://localhost:8000/analyze', { method: 'POST', body: formData });
-      const data = await response.json();
-
-      if (JSON.stringify(data).includes("quota") || response.status === 429) {
-        triggerCooldown(60);
-        return { error: "QUOTA_EXCEEDED" };
-      }
-
-      setResult(data);
-      triggerCooldown(30);
-      return data;
-    } catch (e) {
-      return { error: "CONNECTION_FAILED" };
-    } finally {
-      setLoading(false);
-    }
-  };
+  const analyze = async (type, content) => {
+  setLoading(true);
+  try {
+    const response = await fetch('http://localhost:8000/api/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, content })
+    });
+    const data = await response.json();
+    setResult(data);
+  } catch (error) {
+    console.error("Scan failed", error);
+  } finally {
+    setLoading(false);
+  }
+};
 
   return { analyze, loading, result, cooldown, setResult };
 };

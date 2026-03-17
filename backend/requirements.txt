@@ -37,3 +37,13 @@ typing_extensions==4.15.0
 uritemplate==4.2.0
 urllib3==2.6.3
 uvicorn==0.42.0
+fastapi
+uvicorn
+httpx
+python-dotenv
+fastapi
+uvicorn
+httpx
+python-dotenv
+google-generativeai
+Pillow
