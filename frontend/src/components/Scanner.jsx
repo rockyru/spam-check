@@ -22,22 +22,24 @@ const [feedbackSent, setFeedbackSent] = useState(false);
   };
 
   // 2. Handle Image Selection
-  const handleImageUpload = (event) => {
-    const file = event.target.files && event.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64String = reader.result;
-        setPreview(base64String);
-        setContent('');
-        // mark this as image input
-        setLastType('image');
-        setLastContent(''); // image-only for now
-        analyze('image', '', base64String);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
+const handleImageUpload = (event) => {
+  const file = event.target.files && event.target.files[0];
+  if (file) {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64String = reader.result;
+      setPreview(base64String);
+      setContent('');
+      setLastType('image');
+      setLastContent('');
+      setFeedbackSent(false);    // new scan → clear old feedback state
+
+      analyze('image', '', base64String);
+    };
+    reader.readAsDataURL(file);
+  }
+};
+
 
   // 3. Trigger Analysis (Text or combined)
   const handleVerify = () => {
