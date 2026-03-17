@@ -1,23 +1,11 @@
 import { useState, useEffect } from 'react';
 
 const API_URL = import.meta.env.VITE_API_URL;
-
-// Toggle this to true if you want to disable real API calls
 const MOCK_MODE = false;
 
 const MOCK_RESULTS = [
-  {
-    score: 1,
-    summary:
-      'Everything looks good! This link leads to the official site and shows no signs of a scam.',
-    flags: ['OFFICIAL_SOURCE', 'SECURE_LINK'],
-  },
-  {
-    score: 9,
-    summary:
-      'Watch out! This looks like a phishing attempt designed to steal your login info.',
-    flags: ['MALICIOUS', 'FAKE_SENDER'],
-  },
+  { score: 1, summary: 'Everything looks good!', flags: ['OFFICIAL_SOURCE', 'SECURE_LINK'] },
+  { score: 9, summary: 'Watch out! This looks like phishing.', flags: ['MALICIOUS', 'FAKE_SENDER'] },
 ];
 
 export const useScanner = () => {
@@ -84,7 +72,7 @@ export const useScanner = () => {
 
       const data = await response.json();
       setResult(data);
-      // triggerCooldown(3); // optional
+      // triggerCooldown(3);
     } catch (error) {
       console.error('Scan failed', error);
       setResult({
@@ -97,5 +85,26 @@ export const useScanner = () => {
     }
   };
 
-  return { analyze, loading, result, cooldown, setResult };
+  const sendFeedback = async (inputType, rawContent, userLabel) => {
+    if (MOCK_MODE) return;
+    if (!API_URL || !result) return;
+
+    try {
+      await fetch(`${API_URL}/api/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input_type: inputType,
+          raw_content: rawContent,
+          predicted_score: result.score ?? 0,
+          predicted_flags: result.flags ?? [],
+          user_label: userLabel,
+        }),
+      });
+    } catch (e) {
+      console.error('Feedback failed', e);
+    }
+  };
+
+  return { analyze, loading, result, cooldown, setResult, sendFeedback };
 };

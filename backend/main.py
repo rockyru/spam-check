@@ -8,6 +8,7 @@ import base64
 import re
 from typing import Optional, List
 from urllib.parse import urlparse
+from datetime import datetime
 
 import httpx
 import PIL.Image
@@ -44,6 +45,14 @@ class ScanRequest(BaseModel):
     type: str
 
 
+class FeedbackRequest(BaseModel):
+    input_type: str                # "sms" | "email" | "url" | "website" | "image"
+    raw_content: str
+    predicted_score: int
+    predicted_flags: List[str]
+    user_label: str                # "safe" | "phishing" | "suspicious"
+
+
 def extract_urls(text: str) -> List[str]:
     # Simple URL extraction: http/https plus bare domains.
     pattern = re.compile(r"(https?://[^\s]+|[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,}[^\s]*)")
@@ -58,7 +67,7 @@ def extract_urls(text: str) -> List[str]:
     return clean
 
 
-async def check_safe_browsing(urls: list[str]) -> dict:
+async def check_safe_browsing(urls: List[str]) -> dict:
     if not SAFE_BROWSING_KEY:
         raise RuntimeError("GOOGLE_SAFE_BROWSING_KEY not set")
 
@@ -107,6 +116,20 @@ async def check_safe_browsing(urls: list[str]) -> dict:
         result[u] = key in unsafe_norm
 
     return result
+
+
+def predict_url_risk_ml(url: str) -> float:
+    """
+    Stub for your own ML model.
+
+    Returns a 0–1 risk score.
+    Currently returns 0.0, but later you can:
+    - load a joblib/pickle model at startup
+    - extract URL features
+    - return model.predict_proba([...])[0][1]
+    """
+    return 0.0
+
 
 async def text_spam_with_safe_browsing(text: str) -> dict:
     urls = extract_urls(text)
@@ -180,6 +203,17 @@ async def text_spam_with_safe_browsing(text: str) -> dict:
             except Exception:
                 continue
 
+        # ML hook (currently stubbed)
+        ml_scores = [predict_url_risk_ml(u) for u in urls]
+        ml_max = max(ml_scores) if ml_scores else 0.0
+
+        if ml_max > 0.8:
+            score = max(score, 8)
+            flags.append("ML_HIGH_RISK")
+        elif ml_max > 0.5:
+            score = max(score, 5)
+            flags.append("ML_MEDIUM_RISK")
+
         score = max(0, min(score, 10))
 
     # Clear, human summary
@@ -199,7 +233,10 @@ async def text_spam_with_safe_browsing(text: str) -> dict:
     }
 
 
-async def get_ai_analysis(text_content: str = None, base64_image: str = None):
+async def get_ai_analysis(
+    text_content: str = None,
+    base64_image: str = None,
+):
     """
     Analyze content for scams.
     - If only text: use Safe Browsing on URLs in the text.
@@ -285,12 +322,41 @@ async def verify(request: ScanRequest):
     if not request.content and not request.image:
         raise HTTPException(status_code=400, detail="No content or image provided.")
 
-    result = await get_ai_analysis(request.content, request.image)
+    # Simple routing on type
+    input_type = request.type.lower()
+
+    if input_type in ("url", "website"):
+        # treat content as a single URL
+        text = request.content or ""
+        result = await text_spam_with_safe_browsing(text)
+    else:
+        # sms/email/text/image reuse existing logic
+        result = await get_ai_analysis(request.content, request.image)
 
     if not result:
         raise HTTPException(status_code=500, detail="All models are currently busy.")
 
     return result
+
+
+@app.post("/api/feedback")
+async def feedback(req: FeedbackRequest):
+    """
+    Store user feedback for future model training.
+    Currently appends JSON lines to feedback_log.jsonl.
+    """
+    record = {
+        "ts": datetime.utcnow().isoformat(),
+        **req.model_dump(),
+    }
+    try:
+        with open("feedback_log.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception as e:
+        print(f"DEBUG: Failed to write feedback: {e}")
+        raise HTTPException(status_code=500, detail="Failed to store feedback.")
+
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":
