@@ -13,3 +13,6 @@
 {"ts": "2026-03-17T08:38:10.717652", "input_type": "text", "raw_content": "premierpaymentprocessing.com/includes/boleto-2via-07-2012.php\n", "predicted_score": 4, "predicted_flags": ["RANDOM_SEGMENT", "HAS_LINK", "SUSPICIOUS_PATH"], "user_label": "suspicious"}
 {"ts": "2026-03-17T08:41:19.172468", "input_type": "text", "raw_content": "premierpaymentprocessing.com/includes/boleto-2via-07-2012.php\n", "predicted_score": 4, "predicted_flags": ["RANDOM_SEGMENT", "HAS_LINK", "SUSPICIOUS_PATH"], "user_label": "safe"}
 {"ts": "2026-03-17T08:42:30.822343", "input_type": "text", "raw_content": "myxxxcollection.com/v1/js/jih321/bpd.com.do/do/l.popular.php\n", "predicted_score": 5, "predicted_flags": ["RANDOM_SEGMENT", "HAS_LINK", "SUSPICIOUS_PATH", "DEEP_PATH"], "user_label": "phishing"}
+{"ts": "2026-03-17T09:49:54.216614", "input_type": "text", "raw_content": "users11.jabry.com/reaseo/Aolupdate.htm\n", "predicted_score": 0, "predicted_flags": ["HAS_LINK"], "user_label": "phishing"}
+{"ts": "2026-03-17T10:34:05.789898", "input_type": "text", "raw_content": "nextgensmartphones.com//indexer/Trulia/index.htm\n", "predicted_score": 0, "predicted_flags": ["HAS_LINK"], "user_label": "phishing"}
+{"ts": "2026-03-17T10:38:41.418137", "input_type": "text", "raw_content": "fb.com", "predicted_score": 0, "predicted_flags": ["HAS_LINK"], "user_label": "safe"}

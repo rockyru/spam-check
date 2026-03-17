@@ -2,7 +2,8 @@ import React, { useState, useRef } from 'react';
 import { useScanner } from '../hooks/useScanner';
 
 const Scanner = ({ scannerRef }) => {
-  const { analyze, loading, result, cooldown, sendFeedback } = useScanner();
+ const { analyze, loading, result, cooldown, sendFeedback, rawKey } = useScanner();
+
   const [content, setContent] = useState('');
   const [preview, setPreview] = useState(null);
   const [placeholder, setPlaceholder] = useState('Paste here...');
@@ -10,7 +11,7 @@ const Scanner = ({ scannerRef }) => {
   const [lastContent, setLastContent] = useState('');
   const fileInputRef = useRef(null);
 const [feedbackSent, setFeedbackSent] = useState(false);
-
+const resultRef = useRef(null);
 
 
   // 1. Handle Link Icon Click
@@ -39,25 +40,28 @@ const handleImageUpload = (event) => {
     reader.readAsDataURL(file);
   }
 };
-
+    
 
   // 3. Trigger Analysis (Text or combined)
-  const handleVerify = () => {
-    let type = 'text';
-    if (preview) {
-      type = 'image';
-    } else if (content.startsWith('http://') || content.startsWith('https://')) {
-      type = 'url';
-    } else {
-      type = 'text';
-    }
+const handleVerify = () => {
+  // nothing to check
+  if (!content.trim() && !preview) return;
 
-    setLastType(type);
-    setLastContent(content);
-    analyze(type, content, preview);
-    setFeedbackSent(false);
-  };
+  let type = 'text';
 
+  if (preview) {
+    type = 'image';
+  } else if (content.startsWith('http://') || content.startsWith('https://')) {
+    type = 'url';
+  }
+
+  setLastType(type);
+  setLastContent(content);
+  setFeedbackSent(false);
+
+  // use hook, not fetch directly
+  analyze(type, content, preview);
+};
   // 4. Clear State
   const handleClear = () => {
     setContent('');
@@ -67,14 +71,16 @@ const handleImageUpload = (event) => {
 
   // 5. Report Error → send feedback to backend
   const handleReportError = (userLabel) => {
-    // userLabel: 'safe' | 'phishing' | 'suspicious'
-    let inputType = 'text';
-    if (lastType === 'url') inputType = 'url';
-    if (lastType === 'image') inputType = 'image';
+  let inputType = 'text';
+  if (lastType === 'url') inputType = 'url';
+  if (lastType === 'image') inputType = 'image';
 
-    sendFeedback(inputType, lastContent || '', userLabel);
+  // rawContent param is only a fallback; rawKey will be used
+  sendFeedback(inputType, lastContent || '', userLabel);
   setFeedbackSent(true);
-  };
+};
+
+  
 
   return (
     <section ref={scannerRef} className="py-12 px-6 max-w-xl mx-auto min-h-[700px]">
@@ -164,85 +170,112 @@ const handleImageUpload = (event) => {
       </div>
 
       {/* RESULTS SECTION */}
-      {result && (
-        <div className="bg-white rounded-[2.5rem] p-8 shadow-2xl shadow-black/5 border border-slate-50 animate-in fade-in slide-in-from-bottom-6 duration-700">
-          <div className="flex flex-col items-center gap-8">
-            <div className="text-center">
-              <span
-                className={`text-[11px] font-black uppercase tracking-[0.2em] px-4 py-1.5 rounded-full ${
-                  result.score <= 3 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'
-                }`}
-              >
-                {result.score <= 3 ? '● System Verified Safe' : '● Potential Scam Detected'}
-              </span>
-            </div>
-
-            <div className="w-full h-4 bg-slate-100 rounded-full relative overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-[1500ms] ease-out ${
-                  result.score <= 3 ? 'bg-emerald-400' : 'bg-rose-400'
-                }`}
-                style={{ width: `${(result.score / 10) * 100}%` }}
-              />
-            </div>
-
-            <div className="text-center">
-              <p className="text-xl font-bold text-slate-800 leading-tight mb-4">
-                "{result.summary}"
-              </p>
-
-              <div className="flex flex-wrap justify-center gap-2 mb-6">
-                {result.flags?.map((flag, i) => (
-                  <span
-                    key={i}
-                    className="px-3 py-1 bg-slate-50 text-[9px] font-bold text-slate-400 rounded-full border border-slate-100 uppercase tracking-wider"
-                  >
-                    {flag.replace('_', ' ')}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-          <div className="w-full pt-6 border-t border-slate-50 flex flex-col items-center gap-3">
-  {!feedbackSent ? (
-    <>
-      <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-slate-400">
-        Help improve the checker
-      </p>
-      <div className="flex flex-wrap justify-center gap-3">
-        <button
-          onClick={() => handleReportError('safe')}
-          className="text-[10px] font-black uppercase px-4 py-2 rounded-full border border-slate-200 text-slate-500 hover:text-emerald-600 hover:border-emerald-300 transition-colors"
-        >
-          This is actually safe
-        </button>
-        <button
-          onClick={() => handleReportError('phishing')}
-          className="text-[10px] font-black uppercase px-4 py-2 rounded-full border border-slate-200 text-slate-500 hover:text-rose-600 hover:border-rose-300 transition-colors"
-        >
-          This is actually phishing
-        </button>
-        <button
-          onClick={() => handleReportError('suspicious')}
-          className="text-[10px] font-black uppercase px-4 py-2 rounded-full border border-slate-200 text-slate-500 hover:text-amber-600 hover:border-amber-300 transition-colors"
-        >
-          Not sure / suspicious
-        </button>
-      </div>
-    </>
-  ) : (
-    <p className="text-[10px] font-black uppercase text-emerald-500">
-      Thanks — your feedback helps train the model.
-    </p>
-  )}
+   {result && (
+  <div className="bg-white rounded-[2.5rem] p-8 shadow-2xl shadow-black/5 border border-slate-50 animate-in fade-in slide-in-from-bottom-6 duration-700 mt-8">
+    <div className="flex flex-col items-center gap-8">
+      
+      {/* 1. Status Badge & Numerical Score */}
+<div className="flex flex-col items-center gap-2">
+  <div className="flex items-center gap-3">
+    {/* Large Numerical Score */}
+    <div className="flex flex-col items-center">
+        <span className="text-4xl font-black tracking-tighter text-slate-900">
+            {Number(result.score)}
+            <span className="text-sm text-slate-400 font-medium">/10</span>
+        </span>
+    </div>
+  </div>
+  
+  <span
+    className={`text-[10px] font-black uppercase tracking-[0.2em] px-4 py-1.5 rounded-full ${
+      Number(result.score) <= 3 ? 'bg-emerald-50 text-emerald-600' : 
+      Number(result.score) <= 7 ? 'bg-amber-50 text-amber-600' : 'bg-rose-50 text-rose-600'
+    }`}
+  >
+    {Number(result.score) <= 3 ? '● System Verified Safe' : 
+     Number(result.score) <= 7 ? '● Caution Advised' : '● Potential Scam Detected'}
+  </span>
 </div>
 
+{/* 2. THE SCORE GAUGE */}
+<div className="w-full px-2">
+  <div className="relative mb-2 h-5">
+     <span 
+       className="absolute bottom-0 -translate-x-1/2 text-[9px] font-black uppercase tracking-tighter text-slate-400 transition-all duration-[1500ms] ease-out whitespace-nowrap"
+       style={{ left: `${(Number(result.score) / 10) * 100}%` }}
+     >
+       {Number(result.score) <= 3 ? 'Low Risk' : Number(result.score) <= 7 ? 'Medium Risk' : 'High Risk'}
+     </span>
+  </div>
 
-                
+  <div className="w-full h-3 bg-slate-100 rounded-full relative overflow-hidden shadow-inner">
+    <div
+      className={`h-full rounded-full transition-all duration-[1500ms] ease-out ${
+        Number(result.score) <= 3 ? 'bg-emerald-400' : 
+        Number(result.score) <= 7 ? 'bg-amber-400' : 'bg-rose-400'
+      }`}
+      style={{ 
+          width: `${(Number(result.score) / 10) * 100}%`,
+          boxShadow: Number(result.score) > 3 ? '0 0 12px rgba(0,0,0,0.1)' : 'none' 
+      }}
+    />
+  </div>
+</div>
+      {/* 3. Summary and Flags */}
+      <div className="text-center">
+        <p className="text-xl font-bold text-slate-800 leading-tight mb-4 px-4">
+          "{result.summary}"
+        </p>
 
-          </div>
+        <div className="flex flex-wrap justify-center gap-2 mb-6">
+          {result.flags?.map((flag, i) => (
+            <span
+              key={i}
+              className="px-3 py-1 bg-slate-50 text-[9px] font-bold text-slate-400 rounded-full border border-slate-100 uppercase tracking-wider"
+            >
+              {flag.replace(/_/g, ' ')}
+            </span>
+          ))}
         </div>
-      )}
+      </div>
+
+      {/* 4. Feedback System (Preserved) */}
+      <div className="w-full pt-6 border-t border-slate-50 flex flex-col items-center gap-3">
+        {!feedbackSent ? (
+          <>
+            <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-slate-400">
+              Help improve the checker
+            </p>
+            <div className="flex flex-wrap justify-center gap-3">
+              <button
+                onClick={() => handleReportError('safe')}
+                className="text-[10px] font-black uppercase px-4 py-2 rounded-full border border-slate-200 text-slate-500 hover:text-emerald-600 hover:border-emerald-300 transition-colors"
+              >
+                This is actually safe
+              </button>
+              <button
+                onClick={() => handleReportError('phishing')}
+                className="text-[10px] font-black uppercase px-4 py-2 rounded-full border border-slate-200 text-slate-500 hover:text-rose-600 hover:border-rose-300 transition-colors"
+              >
+                This is actually phishing
+              </button>
+              <button
+                onClick={() => handleReportError('suspicious')}
+                className="text-[10px] font-black uppercase px-4 py-2 rounded-full border border-slate-200 text-slate-500 hover:text-amber-600 hover:border-amber-300 transition-colors"
+              >
+                Not sure / suspicious
+              </button>
+            </div>
+          </>
+        ) : (
+          <p className="text-[10px] font-black uppercase text-emerald-500 animate-in fade-in zoom-in duration-300">
+            Thanks — your feedback helps train the model.
+          </p>
+        )}
+      </div>
+    </div>
+  </div>
+)}
     </section>
   );
 };

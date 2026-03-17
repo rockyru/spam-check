@@ -19,6 +19,9 @@ export const useScanner = () => {
     return remaining > 0 ? remaining : 0;
   });
 
+  const [rawKey, setRawKey] = useState('');
+
+
   useEffect(() => {
     if (cooldown > 0) {
       const timer = setInterval(() => {
@@ -72,6 +75,7 @@ export const useScanner = () => {
 
       const data = await response.json();
       setResult(data);
+      setRawKey(data.raw_key || ''); 
       // triggerCooldown(3);
     } catch (error) {
       console.error('Scan failed', error);
@@ -85,7 +89,7 @@ export const useScanner = () => {
     }
   };
 
-  const sendFeedback = async (inputType, rawContent, userLabel) => {
+ const sendFeedback = async (inputType, _rawContent, userLabel) => {
     if (MOCK_MODE) return;
     if (!API_URL || !result) return;
 
@@ -95,7 +99,7 @@ export const useScanner = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           input_type: inputType,
-          raw_content: rawContent,
+          raw_content: rawKey || _rawContent || '',
           predicted_score: result.score ?? 0,
           predicted_flags: result.flags ?? [],
           user_label: userLabel,
@@ -106,5 +110,6 @@ export const useScanner = () => {
     }
   };
 
-  return { analyze, loading, result, cooldown, setResult, sendFeedback };
+    return { analyze, loading, result, cooldown, setResult, sendFeedback, rawKey };
+
 };
