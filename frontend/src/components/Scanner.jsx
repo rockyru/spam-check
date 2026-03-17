@@ -66,7 +66,7 @@ const Scanner = ({ scannerRef }) => {
   };
 
   return (
-    <section ref={scannerRef} className="py-20 px-6 max-w-xl mx-auto min-h-screen">
+    <section id="scanner" ref={scannerRef} className="py-20 px-6 max-w-xl mx-auto min-h-screen">
       {/* HEADER SECTION */}
       <div className="mb-10 flex justify-between items-end animate-in fade-in slide-in-from-top-4 duration-700">
         <div>
