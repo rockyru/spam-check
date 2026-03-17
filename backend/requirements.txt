@@ -4,3 +4,5 @@ httpx
 python-dotenv
 google-generativeai
 Pillow
+supabase
+google-genai
