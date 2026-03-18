@@ -24,7 +24,7 @@ class InMemoryRateLimiter:
 
 scan_limiter = InMemoryRateLimiter(max_requests=10, window_seconds=60)       # /api/verify
 metrics_limiter = InMemoryRateLimiter(max_requests=10, window_seconds=60)    # /api/metrics
-feedback_limiter = InMemoryRateLimiter(max_requests=10, window_seconds=60)   # /api/feedback
+feedback_limiter = InMemoryRateLimiter(max_requests=5, window_seconds=300)   # /api/feedback
 
 async def limit_scans(request: Request):
     ip = request.client.host or "unknown"

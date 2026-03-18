@@ -48,3 +48,5 @@
 {"ts": "2026-03-17T13:37:27.372912", "input_type": "text", "raw_content": "dsds", "score": 0, "flags": [], "summary": "No scam patterns or links detected."}
 {"ts": "2026-03-17T13:39:04.531275", "input_type": "text", "raw_content": "ddd", "score": 0, "flags": [], "summary": "No scam patterns or links detected."}
 {"ts": "2026-03-17T15:10:24.431712", "input_type": "text", "raw_content": "docs.google.com/spreadsheet/viewform?formkey=dGdieTRJdWpOSzIwcGwtQ2MxdzA4aFE6MQ", "score": 5, "flags": ["USER_REPORTED_PHISHING", "HAS_LINK"], "summary": "Medium risk: treat with caution"}
+{"ts": "2026-03-18T23:03:08.466451", "input_type": "text", "raw_content": "nigga", "score": 0, "flags": [], "summary": "No scam patterns or links detected."}
+{"ts": "2026-03-18T23:06:11.341112", "input_type": "text", "raw_content": "nigga", "score": 0, "flags": [], "summary": "No scam patterns or links detected."}

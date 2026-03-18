@@ -20,6 +20,7 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from supabase import create_client, Client
+from fastapi import HTTPException, Request
 
 import hashlib
 
@@ -59,6 +60,13 @@ if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
 
 MODELS = ["models/gemini-1.5-flash", "models/gemini-1.5-pro"]
+
+
+SLUR_PATTERNS = [
+    r"\bnigga\b",
+    r"\bnigger\b",
+]
+
 
 # ---------- Safe Browsing ----------
 
@@ -105,7 +113,13 @@ def normalize_url_for_lookup(url: str) -> str:
     except Exception:
         return url.strip().lower()
 
+def is_toxic(text: str) -> bool:
+    if not text:
+        return False
+    normalized = text.lower()
+    return any(re.search(pat, normalized) for pat in SLUR_PATTERNS)
 
+    
 async def check_safe_browsing(urls: List[str]) -> dict:
     if not SAFE_BROWSING_KEY:
         raise RuntimeError("GOOGLE_SAFE_BROWSING_KEY not set")
@@ -615,7 +629,15 @@ async def verify(request: ScanRequest):
     return response_payload
 
 @router.post("/api/feedback", dependencies=[Depends(limit_feedback)])
-async def submit_feedback(payload: FeedbackIn):
+async def submit_feedback(payload: FeedbackIn, request: Request):
+    content = (payload.raw_content or "").strip()
+    print("DEBUG FEEDBACK raw_content:", repr(content))
+
+    if is_toxic(content):
+        ip = request.client.host or "unknown"
+        print(f"TOXIC_FEEDBACK ip={ip} content={repr(content)}")
+        return {"status": "ignored"}  # no DB write
+
     resp = (
         supabase.table("feedback")
         .insert({
@@ -629,7 +651,6 @@ async def submit_feedback(payload: FeedbackIn):
     )
 
     print("DEBUG feedback insert:", resp)
-
     return {"ok": True}
 
 
