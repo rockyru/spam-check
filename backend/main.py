@@ -553,9 +553,19 @@ def image_hash(base64_image: str) -> str:
 # ---------- Routes ----------
 
 @app.post("/api/verify", dependencies=[Depends(limit_scans)])
-async def verify(request: ScanRequest):
+async def verify(request: ScanRequest, http_req: Request):
     if not request.content and not request.image:
         raise HTTPException(status_code=400, detail="No content or image provided.")
+
+    if request.content and is_toxic(request.content):
+        ip = http_req.client.host or "unknown"
+        print(f"TOXIC_SCAN ip={ip} content={repr(request.content)}")
+        return {
+            "score": 0,
+            "summary": "This content can't be analyzed.",
+            "flags": ["BLOCKED_CONTENT"],
+            "raw_key": "",
+        }
 
     input_type = request.type.lower()
 
