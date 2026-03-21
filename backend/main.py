@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, APIRouter
+from fastapi import FastAPI, HTTPException, APIRouter, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
@@ -11,18 +11,16 @@ from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import Depends
-from rate_limit import limit_scans, limit_metrics, limit_feedback
-from metrics_cache import metrics_cache
 import httpx
 import PIL.Image
 import google.generativeai as genai
 from dotenv import load_dotenv
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from supabase import create_client, Client
-from fastapi import HTTPException, Request
-
 import hashlib
+
+from rate_limit import limit_scans, limit_metrics, limit_feedback
+from metrics_cache import metrics_cache
 
 load_dotenv()
 
@@ -61,12 +59,39 @@ if GOOGLE_API_KEY:
 
 MODELS = ["models/gemini-1.5-flash", "models/gemini-1.5-pro"]
 
+# ---------- Content filtering ----------
 
 SLUR_PATTERNS = [
     r"\bnigga\b",
     r"\bnigger\b",
 ]
 
+LOW_VALUE_WORDS = {"test", "testing", "asd", "qwe", "fgfg"}
+
+MIN_CONTENT_LEN = 25  # below this is considered useless noise
+
+
+def is_toxic(text: str) -> bool:
+    if not text:
+        return False
+    normalized = text.lower()
+    return any(re.search(pat, normalized) for pat in SLUR_PATTERNS)
+
+
+def is_low_value(text: str) -> bool:
+    """
+    Filters out obvious junk like 'test', super-short noise, and slurs.
+    """
+    if not text:
+        return True
+    t = text.strip().lower()
+    if len(t) < MIN_CONTENT_LEN:
+        return True
+    if t in LOW_VALUE_WORDS:
+        return True
+    if is_toxic(t):
+        return True
+    return False
 
 # ---------- Safe Browsing ----------
 
@@ -81,7 +106,6 @@ class ScanRequest(BaseModel):
     type: str
 
 
-# IMPORTANT: this now matches useScanner.sendFeedback
 class FeedbackIn(BaseModel):
     input_type: str
     raw_content: str
@@ -113,13 +137,6 @@ def normalize_url_for_lookup(url: str) -> str:
     except Exception:
         return url.strip().lower()
 
-def is_toxic(text: str) -> bool:
-    if not text:
-        return False
-    normalized = text.lower()
-    return any(re.search(pat, normalized) for pat in SLUR_PATTERNS)
-
-    
 async def check_safe_browsing(urls: List[str]) -> dict:
     if not SAFE_BROWSING_KEY:
         raise RuntimeError("GOOGLE_SAFE_BROWSING_KEY not set")
@@ -167,10 +184,8 @@ async def check_safe_browsing(urls: List[str]) -> dict:
 
     return result
 
-
 def predict_url_risk_ml(url: str) -> float:
     return 0.0
-
 
 def _load_jsonl(path: Path):
     if not path.exists():
@@ -187,10 +202,9 @@ def _load_jsonl(path: Path):
                 continue
     return items
 
-
-async def _feedback_risk_boost(urls: List[str]) -> tuple[int, list[str]]:
+async def _feedback_risk_boost(urls: List[str]) -> tuple[int, int, list[str]]:
     if not urls:
-        return 0, []
+        return 0, 0, []
 
     url_keys = {normalize_url_for_lookup(u) for u in urls}
 
@@ -203,9 +217,10 @@ async def _feedback_risk_boost(urls: List[str]) -> tuple[int, list[str]]:
         feedbacks = fb_resp.data or []
     except Exception as e:
         print(f"DEBUG: Failed to load feedback from Supabase: {e}")
-        return 0, []
+        return 0, 0, []
 
     extra = 0
+    community_extra = 0
     extra_flags: list[str] = []
 
     for fb in feedbacks:
@@ -214,22 +229,29 @@ async def _feedback_risk_boost(urls: List[str]) -> tuple[int, list[str]]:
         if key not in url_keys:
             continue
 
-        label = fb.get("user_label")
+        label = (fb.get("user_label") or "").lower()
         if label == "phishing":
-            extra = max(extra, 5)
+            extra = min(6, extra + 2)
+            community_extra = min(6, community_extra + 2)
             extra_flags.append("USER_REPORTED_PHISHING")
         elif label == "suspicious":
-            extra = max(extra, 2)
+            extra = min(3, extra + 1)
+            community_extra = min(3, community_extra + 1)
             extra_flags.append("USER_REPORTED_SUSPICIOUS")
         elif label == "safe":
+            extra = max(-3, extra - 1)
+            community_extra = max(-3, community_extra - 1)
             extra_flags.append("USER_REPORTED_SAFE")
 
-    return extra, list(set(extra_flags))
+    return extra, community_extra, list(set(extra_flags))
 
 # ---------- Scoring ----------
 
 async def text_spam_with_safe_browsing(text: str) -> dict:
     urls = extract_urls(text)
+
+    # default when no URLs: no community score
+    community_extra = 0
 
     if not urls:
         score, flags = sms_text_risk(text)
@@ -246,6 +268,7 @@ async def text_spam_with_safe_browsing(text: str) -> dict:
             "score": score,
             "summary": summary,
             "flags": flags,
+            "community_score": 0,
         }
 
     sb_result = await check_safe_browsing(urls)
@@ -284,6 +307,12 @@ async def text_spam_with_safe_browsing(text: str) -> dict:
             "/cgi-bin",
         ]
 
+        # 1) community boost from feedback (once)
+        fb_extra, community_extra, fb_flags = await _feedback_risk_boost(urls)
+        score += fb_extra
+        flags.extend(fb_flags)
+
+        # 2) heuristic URL rules
         for raw in urls:
             try:
                 p = urlparse(raw)
@@ -312,6 +341,7 @@ async def text_spam_with_safe_browsing(text: str) -> dict:
             except Exception:
                 continue
 
+        # 3) ML placeholder
         ml_scores = [predict_url_risk_ml(u) for u in urls]
         ml_max = max(ml_scores) if ml_scores else 0.0
 
@@ -322,26 +352,15 @@ async def text_spam_with_safe_browsing(text: str) -> dict:
             score = max(score, 5)
             flags.append("ML_MEDIUM_RISK")
 
-        fb_extra, fb_flags = await _feedback_risk_boost(urls)
-        score += fb_extra
-        flags.extend(fb_flags)
-
-        # NEW: brand / pattern rules for PH scams
+        # brand / pattern rules
         text_low = (text or "").lower()
 
-        # BDO account security scare (like your example)
         if "bdo" in text_low and "account" in text_low and any(
             p in text_low for p in ["unusual activity", "verify your details", "verify your account"]
         ):
-            score = max(score, 8)  # force High
+            score = max(score, 8)
             flags.append("BRAND_IMPERSONATION")
             flags.append("ACCOUNT_SECURITY_SCARE")
-
-        # You can add more brand rules similarly, e.g. GCash, BPI, etc.
-        # if "gcash" in text_low and "account" in text_low and "verify" in text_low:
-        #     score = max(score, 8)
-        #     flags.append("EWALLET_IMPERSONATION")
-        #     flags.append("ACCOUNT_SECURITY_SCARE")
 
         score = max(0, min(score, 10))
 
@@ -354,7 +373,12 @@ async def text_spam_with_safe_browsing(text: str) -> dict:
     else:
         summary = "No known issues detected"
 
-    return {"score": score, "summary": summary, "flags": list(set(flags))}
+    return {
+        "score": score,
+        "summary": summary,
+        "flags": list(set(flags)),
+        "community_score": community_extra,
+    }
 
 # ---------- AI analysis ----------
 
@@ -426,19 +450,13 @@ async def get_ai_analysis(text_content: str = None, base64_image: str = None):
     if text_content:
         return await text_spam_with_safe_browsing(text_content)
 
-    # Final fallback: model unavailable, but don't 500 the user
     return {
         "score": 0,
         "summary": "Image analysis is temporarily unavailable; no known issues detected.",
         "flags": ["MODEL_UNAVAILABLE"],
     }
 
-
 async def _feedback_strongest_label(raw_content: str) -> str | None:
-    """
-    Look up feedback rows for this raw_content and return the strongest label:
-    'phishing' > 'suspicious' > 'safe'. None if no feedback.
-    """
     if not raw_content:
         return None
 
@@ -469,20 +487,14 @@ async def _feedback_strongest_label(raw_content: str) -> str | None:
     return strongest
 
 def sms_text_risk(text: str) -> tuple[int, list[str]]:
-    """
-    Simple heuristic risk scoring for SMS without URLs.
-    Score: 0–10, higher = more likely scam/smishing.
-    """
     t = (text or "").lower()
     score = 0
     flags: list[str] = []
 
-    # 1) Urgency / pressure
     if any(p in t for p in ["urgent", "immediately", "right away", "act now", "asap", "within 24 hours"]):
         score += 2
         flags.append("URGENT_LANGUAGE")
 
-    # 2) Money / prizes / rewards
     if any(p in t for p in ["you have won", "congratulations", "winner", "jackpot", "lottery", "prize"]):
         score += 3
         flags.append("FAKE_GIVEAWAY")
@@ -491,7 +503,6 @@ def sms_text_risk(text: str) -> tuple[int, list[str]]:
         score += 2
         flags.append("REWARD_OFFER")
 
-    # 3) Bank / account / OTP / verification
     if any(p in t for p in ["otp", "one time password", "verification code", "6-digit code", "6 digit code"]):
         score += 2
         flags.append("CODE_REQUEST")
@@ -504,7 +515,6 @@ def sms_text_risk(text: str) -> tuple[int, list[str]]:
         score += 2
         flags.append("ACCOUNT_THREAT")
 
-    # 4) Delivery / parcel scams
     if any(p in t for p in ["package", "parcel", "delivery", "shipment"]):
         score += 2
         flags.append("DELIVERY_MENTION")
@@ -513,12 +523,10 @@ def sms_text_risk(text: str) -> tuple[int, list[str]]:
         score += 2
         flags.append("FEE_REQUEST")
 
-    # 5) Generic greeting / impersonation
     if any(p in t for p in ["dear customer", "valued customer", "dear user"]):
         score += 1
         flags.append("GENERIC_GREETING")
 
-    # 6) Social engineering patterns
     if any(p in t for p in ["wrong number", "sorry wrong number"]):
         score += 1
         flags.append("WRONG_NUMBER_BAIT")
@@ -527,16 +535,13 @@ def sms_text_risk(text: str) -> tuple[int, list[str]]:
         score += 2
         flags.append("EMERGENCY_STORY")
 
-    # 7) Callback / contact tricks
     if any(p in t for p in ["call this number", "contact this number", "text back this number"]):
         score += 1
         flags.append("CALLBACK_REQUEST")
 
-    # Normalize
     score = max(0, min(score, 10))
     flags = list(set(flags))
     return score, flags
-
 
 def image_hash(base64_image: str) -> str:
     try:
@@ -548,8 +553,6 @@ def image_hash(base64_image: str) -> str:
         print(f"DEBUG: image_hash failed: {e}")
         return ""
 
-
-
 # ---------- Routes ----------
 
 @app.post("/api/verify", dependencies=[Depends(limit_scans)])
@@ -557,9 +560,12 @@ async def verify(request: ScanRequest, http_req: Request):
     if not request.content and not request.image:
         raise HTTPException(status_code=400, detail="No content or image provided.")
 
-    if request.content and is_toxic(request.content):
+    content = (request.content or "").strip()
+
+    # Block obviously junk / abusive text so it doesn't hit scans
+    if content and is_low_value(content):
         ip = http_req.client.host or "unknown"
-        print(f"TOXIC_SCAN ip={ip} content={repr(request.content)}")
+        print(f"IGNORED_SCAN ip={ip} content={repr(content)}")
         return {
             "score": 0,
             "summary": "This content can't be analyzed.",
@@ -570,10 +576,9 @@ async def verify(request: ScanRequest, http_req: Request):
     input_type = request.type.lower()
 
     if input_type in ("url", "website"):
-        text = request.content or ""
-        result = await text_spam_with_safe_browsing(text)
+        result = await text_spam_with_safe_browsing(content)
     else:
-        result = await get_ai_analysis(request.content, request.image)
+        result = await get_ai_analysis(content, request.image)
 
     if result is None:
         result = {
@@ -582,15 +587,14 @@ async def verify(request: ScanRequest, http_req: Request):
             "flags": ["MODEL_UNAVAILABLE"],
         }
 
-    # NEW: stable raw_key for scans and feedback
-    if request.content:
-        raw_key = request.content
+    # stable raw_key
+    if content:
+        raw_key = content
     elif request.image:
         raw_key = image_hash(request.image)
     else:
         raw_key = ""
 
-    # override based on feedback for this key
     strongest = await _feedback_strongest_label(raw_key)
     if strongest == "phishing":
         result["score"] = max(result.get("score", 0), 9)
@@ -606,34 +610,36 @@ async def verify(request: ScanRequest, http_req: Request):
         flags.add("USER_REPORTED_SUSPICIOUS")
         result["flags"] = list(flags)
 
-    # use raw_key instead of request.content
-    try:
-        supabase.table("scans").insert({
+    if "community_score" not in result:
+        result["community_score"] = 0
+
+    if raw_key:
+        try:
+            supabase.table("scans").insert({
+                "input_type": input_type,
+                "raw_content": raw_key,
+                "score": result.get("score", 0),
+                "community_score": result.get("community_score", 0),
+                "flags": result.get("flags", []),
+                "summary": result.get("summary", ""),
+            }).execute()
+        except Exception as e:
+            print(f"DEBUG: Failed to write scan to Supabase: {e}")
+
+        event = {
+            "ts": datetime.utcnow().isoformat(),
             "input_type": input_type,
             "raw_content": raw_key,
             "score": result.get("score", 0),
             "flags": result.get("flags", []),
             "summary": result.get("summary", ""),
-        }).execute()
-    except Exception as e:
-        print(f"DEBUG: Failed to write scan to Supabase: {e}")
+        }
+        try:
+            with open(SCAN_EVENTS_PATH, "a", encoding="utf-8") as f:
+                f.write(json.dumps(event) + "\n")
+        except Exception as e:
+            print(f"DEBUG: failed to write scan event: {e}")
 
-    # optional JSONL log
-    event = {
-        "ts": datetime.utcnow().isoformat(),
-        "input_type": input_type,
-        "raw_content": raw_key,
-        "score": result.get("score", 0),
-        "flags": result.get("flags", []),
-        "summary": result.get("summary", ""),
-    }
-    try:
-        with open(SCAN_EVENTS_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(event) + "\n")
-    except Exception as e:
-        print(f"DEBUG: failed to write scan event: {e}")
-
-    # include raw_key in response so frontend can reuse it
     response_payload = dict(result)
     response_payload["raw_key"] = raw_key
     return response_payload
@@ -643,10 +649,10 @@ async def submit_feedback(payload: FeedbackIn, request: Request):
     content = (payload.raw_content or "").strip()
     print("DEBUG FEEDBACK raw_content:", repr(content))
 
-    if is_toxic(content):
+    if is_low_value(content):
         ip = request.client.host or "unknown"
-        print(f"TOXIC_FEEDBACK ip={ip} content={repr(content)}")
-        return {"status": "ignored"}  # no DB write
+        print(f"IGNORED_FEEDBACK ip={ip} content={repr(content)}")
+        return {"status": "ignored"}
 
     resp = (
         supabase.table("feedback")
@@ -662,7 +668,6 @@ async def submit_feedback(payload: FeedbackIn, request: Request):
 
     print("DEBUG feedback insert:", resp)
     return {"ok": True}
-
 
 @app.get("/api/metrics/summary", dependencies=[Depends(limit_metrics)])
 async def metrics_summary():
@@ -772,7 +777,6 @@ async def metrics_summary():
         "sb_hit_rate": sb_hit_rate,
         "daily_scans": daily_scans,
     }
-
 
     metrics_cache.set(summary)
     return summary

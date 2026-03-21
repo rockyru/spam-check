@@ -233,7 +233,27 @@ const Scanner = ({ scannerRef }) => {
               )}
             </div>
           </div>
+          <div className="mt-6 bg-white rounded-[2rem] p-6 shadow-lg border border-slate-100">
+      <p className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-400 mb-2">
+        Community signal
+      </p>
+      <p className="text-slate-800 text-sm font-medium mb-1">
+        {result.community_score > 0
+          ? `+${result.community_score} points from user reports`
+          : result.community_score < 0
+          ? `${result.community_score} points from user reports`
+          : "No community reports yet for this item"}
+      </p>
+      {(result.flags || []).some(f =>
+        ["USER_REPORTED_PHISHING","USER_REPORTED_SUSPICIOUS","USER_REPORTED_SAFE"].includes(f)
+      ) && (
+        <p className="text-xs text-slate-500">
+          Based on anonymous feedback from people who scanned similar content.
+        </p>
+      )}
+    </div>
         </div>
+        
       )}
     </section>
   );
